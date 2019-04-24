@@ -1,5 +1,7 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.1)
 
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 FIND_PACKAGE(PythonInterp)
 
 if (PYTHONINTERP_FOUND)
@@ -38,3 +40,4 @@ INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS} ${PYTHON_INCLUDE_DIRS})
 LINK_LIBRARIES(${Boost_LIBRARIES} ${PYTHON_LIBRARIES}) # Deprecated but so convenient!
 
 ADD_SUBDIRECTORY(core)
+#ADD_SUBDIRECTORY(sample)

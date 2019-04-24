@@ -1,5 +1,4 @@
 #!/usr/bin/env python
 
 import core 
-print(core.greet())
-
+print(core.create_offer())
