@@ -1,6 +1,16 @@
 import json
 import sys
 
+import core
+import atexit
+atexit.register(core.unload)
+
+def callback():
+    print('callback called')
+
+def create_offer():
+    core.create_offer(callback)
+
 async def send_message(ws, msg_type, msg):
     await ws.send_str(json.dumps({
         'msg_type': msg_type,
@@ -22,4 +32,5 @@ async def handle_message(ws, data):
         sys.exit(0)
 
 async def attempt_connection(ws):
+    create_offer()
     await send_message(ws, '/signaling/offer', 'offer')

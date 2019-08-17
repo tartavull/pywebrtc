@@ -1,10 +1,11 @@
+#include "libwebrtc.h"
 
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
+
 
 #include <api/audio_codecs/builtin_audio_decoder_factory.h>
 #include <api/audio_codecs/builtin_audio_encoder_factory.h>
@@ -15,8 +16,15 @@
 #include <rtc_base/physicalsocketserver.h>
 #include <rtc_base/ssladapter.h>
 #include <rtc_base/thread.h>
+#include <rtc_base/logging.h>
 
 #include "picojson/picojson.h"
+
+namespace pywebrtc
+{
+
+std::function<void(std::string)> offer_callback;
+std::function<void(std::string)> answer_callback;
 
 class Connection {
  public:
@@ -25,12 +33,16 @@ class Connection {
   std::string sdp_type;
   picojson::array ice_array;
 
+  // Offer/Answerの作成が成功したら、LocalDescriptionとして設定 & 相手に渡す文字列として表示
   void onSuccessCSD(webrtc::SessionDescriptionInterface* desc) {
     peer_connection->SetLocalDescription(ssdo, desc);
-
     std::string sdp;
     desc->ToString(&sdp);
-    std::cout << sdp_type << " SDP:begin" << std::endl << sdp << sdp_type << " SDP:end" << std::endl;
+    if (sdp_type == "Offer") {
+        offer_callback(sdp);
+    } else {
+        answer_callback(sdp);
+    }
   }
 
   // ICEを取得したら、表示用JSON配列の末尾に追加
@@ -184,13 +196,12 @@ rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peer_connection_facto
 webrtc::PeerConnectionInterface::RTCConfiguration configuration;
 Connection connection;
 
-void cmd_sdp1() {
+void create_offer(std::function<void(std::string)> callback) {
+  offer_callback = callback;
   connection.peer_connection = peer_connection_factory->CreatePeerConnection(
-    configuration, nullptr, nullptr, &connection.pco);
+              configuration, nullptr, nullptr, &connection.pco);
 
   webrtc::DataChannelInit config;
-  // DataChannelの設定
-
   connection.data_channel = connection.peer_connection->CreateDataChannel("data_channel", &config);
   connection.data_channel->RegisterObserver(&connection.dco);
 
@@ -199,13 +210,16 @@ void cmd_sdp1() {
     std::cout << "Error on CreatePeerConnection." << std::endl;
     return;
   }
-  connection.sdp_type = "Offer";
-  connection.peer_connection->CreateOffer(connection.csdo,
-    webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
+  connection.sdp_type = "Offer";  
+  connection.peer_connection->CreateOffer(
+          connection.csdo, webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
 }
 
-void cmd_sdp2(const std::string& parameter) {
-  connection.peer_connection = peer_connection_factory->CreatePeerConnection(configuration, nullptr, nullptr, &connection.pco);
+void create_answer(const std::string& offer, std::function<void(std::string)> callback) {
+  answer_callback = callback;
+  connection.peer_connection =
+      peer_connection_factory->CreatePeerConnection(configuration, nullptr,
+              nullptr, &connection.pco);
 
   if (connection.peer_connection.get() == nullptr) {
     peer_connection_factory = nullptr;
@@ -214,12 +228,11 @@ void cmd_sdp2(const std::string& parameter) {
   }
   webrtc::SdpParseError error;
   webrtc::SessionDescriptionInterface* session_description(
-      webrtc::CreateSessionDescription("offer", parameter, &error));
+      webrtc::CreateSessionDescription("offer", offer, &error));
   if (session_description == nullptr) {
     std::cout << "Error on CreateSessionDescription." << std::endl
               << error.line << std::endl
               << error.description << std::endl;
-    std::cout << "Offer SDP:begin" << std::endl << parameter << std::endl << "Offer SDP:end" << std::endl;
   }
   connection.peer_connection->SetRemoteDescription(connection.ssdo, session_description);
 
@@ -228,27 +241,28 @@ void cmd_sdp2(const std::string& parameter) {
                                            webrtc::PeerConnectionInterface::RTCOfferAnswerOptions());
 }
 
-void cmd_sdp3(const std::string& parameter) {
+void set_answer(const std::string& answer) {
   webrtc::SdpParseError error;
   webrtc::SessionDescriptionInterface* session_description(
-      webrtc::CreateSessionDescription("answer", parameter, &error));
+      webrtc::CreateSessionDescription("answer", answer, &error));
   if (session_description == nullptr) {
     std::cout << "Error on CreateSessionDescription." << std::endl
               << error.line << std::endl
               << error.description << std::endl;
-    std::cout << "Answer SDP:begin" << std::endl << parameter << std::endl << "Answer SDP:end" << std::endl;
   }
-  connection.peer_connection->SetRemoteDescription(connection.ssdo, session_description);
+  connection.peer_connection->SetRemoteDescription(
+          connection.ssdo, session_description);
 }
 
-void cmd_ice1() {
-  std::cout << picojson::value(connection.ice_array).serialize(true) << std::endl;
+std::string get_candidates() {
+  auto candidates = picojson::value(connection.ice_array).serialize(true);
   connection.ice_array.clear();
+  return candidates;
 }
 
-void cmd_ice2(const std::string& parameter) {
+void set_candidates(const std::string& candidates) {
   picojson::value v;
-  std::string err = picojson::parse(v, parameter);
+  std::string err = picojson::parse(v, candidates);
   if (!err.empty()) {
     std::cout << "Error on parse json : " << err << std::endl;
     return;
@@ -272,38 +286,32 @@ void cmd_ice2(const std::string& parameter) {
   }
 }
 
-void cmd_send(const std::string& parameter) {
-  webrtc::DataBuffer buffer(rtc::CopyOnWriteBuffer(parameter.c_str(), parameter.size()), true);
-  std::cout << "Send(" << connection.data_channel->state() << ")" << std::endl;
+void send_data(const std::string& data) {
+  webrtc::DataBuffer buffer(rtc::CopyOnWriteBuffer(data.c_str(), data.size()), true);
   connection.data_channel->Send(buffer);
 }
 
-void cmd_quit() {
-  // スレッドを活かしながらCloseしないと、別スレッドからのイベント待ちになり終了できなくなる
+void destructor() {
+  rtc::CleanupSSL();
   connection.peer_connection->Close();
   connection.peer_connection = nullptr;
   connection.data_channel = nullptr;
   peer_connection_factory = nullptr;
-  // リソースを開放したらスレッドを止めてOK
   network_thread->Stop();
   worker_thread->Stop();
   signaling_thread->Stop();
 }
 
-int main(int argc, char* argv[]) {
-  // 第三引数にtrueを指定すると、WebRTC関連の引数をargvから削除してくれるらしい
-  rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true);
-  rtc::FlagList::Print(nullptr, false);
-
-  std::cout << std::this_thread::get_id() << ":"
+int initialize () {
+  rtc::LogMessage::LogToDebug(rtc::LS_ERROR);
+    std::cout << std::this_thread::get_id() << ":"
             << "Main thread" << std::endl;
 
-  // GoogleのSTUNサーバを利用
   webrtc::PeerConnectionInterface::IceServer ice_server;
   ice_server.uri = "stun:stun.l.google.com:19302";
   configuration.servers.push_back(ice_server);
-  rtc::InitializeSSL();
 
+  rtc::InitializeSSL();
   network_thread = rtc::Thread::CreateWithSocketServer();
   network_thread->Start();
   worker_thread = rtc::Thread::Create();
@@ -315,84 +323,17 @@ int main(int argc, char* argv[]) {
       network_thread.get(),
       worker_thread.get(),
       signaling_thread.get(),
-      nullptr /* default_adm */,
+      nullptr ,
       webrtc::CreateBuiltinAudioEncoderFactory(),
       webrtc::CreateBuiltinAudioDecoderFactory(),
       webrtc::CreateBuiltinVideoEncoderFactory(),
       webrtc::CreateBuiltinVideoDecoderFactory(),
-      nullptr /* audio_mixer */,
-      nullptr /* audio_processing */);
+      nullptr ,
+      nullptr );
 
   if (peer_connection_factory.get() == nullptr) {
     std::cout << "Error on CreatePeerConnectionFactory." << std::endl;
     return EXIT_FAILURE;
   }
-
-  std::string line;
-  std::string command;
-  std::string parameter;
-  bool is_cmd_mode = true;
-
-  while (std::getline(std::cin, line)) {
-    if (is_cmd_mode) {
-      if (line == "") {
-        continue;
-
-      } else if (line == "sdp1") {
-        cmd_sdp1();
-
-      } else if (line == "sdp2") {
-        command = "sdp2";
-        is_cmd_mode = false;
-
-      } else if (line == "sdp3") {
-        command = "sdp3";
-        is_cmd_mode = false;
-
-      } else if (line == "ice1") {
-        cmd_ice1();
-
-      } else if (line == "ice2") {
-        command = "ice2";
-        is_cmd_mode = false;
-
-      } else if (line == "send") {
-        command = "send";
-        is_cmd_mode = false;
-
-      } else if (line == "quit") {
-        cmd_quit();
-        break;
-
-      } else {
-        std::cout << "?" << line << std::endl;
-      }
-
-    } else {
-      if (line == ";") {
-        if (command == "sdp2") {
-          cmd_sdp2(parameter);
-
-        } else if (command == "sdp3") {
-          cmd_sdp3(parameter);
-
-        } else if (command == "ice2") {
-          cmd_ice2(parameter);
-
-        } else if (command == "send") {
-          cmd_send(parameter);
-        }
-        
-        parameter = "";
-        is_cmd_mode = true;
-
-      } else {
-        parameter += line + "\n";
-      }
-    }
-  }
-
-  rtc::CleanupSSL();
-
-  return 0;
+}
 }
