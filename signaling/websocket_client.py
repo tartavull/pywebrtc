@@ -9,7 +9,7 @@ import aiohttp
 import aiohttp.web
 from aiohttp import web
 
-from signaling import send_message, handle_message, attempt_connection
+from signaling import send_data, send_message, handle_message, attempt_connection
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,8 +35,25 @@ async def connect_websocket():
             async for msg in ws:
                 aio.create_task(handle_message(ws, msg.data))
 
+
+async def heartbeat():
+    while True:
+        await aio.sleep(1)
+        print('heartbeat')
+        payload = {
+            'storage_available': 2**30,
+            'battery_voltage': 7.5,
+            'current_used': 7.5,
+            'lattitude': 43.6532,
+            'longitude': 79.3832,
+            'speed': 3.4,
+            'RSSI': -50,
+        }
+        loop.create_task(send_data(json.dumps(payload)))
+
 async def main():
     aio.create_task(connect_websocket())
+    loop.create_task(heartbeat())
 
 if __name__ == '__main__':
     loop = aio.get_event_loop()
