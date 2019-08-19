@@ -25,6 +25,11 @@ namespace pywebrtc
 
 std::function<void(std::string)> offer_callback;
 std::function<void(std::string)> answer_callback;
+std::function<void(std::string,std::string)> python_log;
+
+void set_log_function(std::function<void(std::string, std::string)> fn) {
+    python_log = fn;
+}
 
 class Connection {
  public:
@@ -33,7 +38,6 @@ class Connection {
   std::string sdp_type;
   picojson::array ice_array;
 
-  // Offer/Answerの作成が成功したら、LocalDescriptionとして設定 & 相手に渡す文字列として表示
   void onSuccessCSD(webrtc::SessionDescriptionInterface* desc) {
     peer_connection->SetLocalDescription(ssdo, desc);
     std::string sdp;
@@ -65,47 +69,40 @@ class Connection {
     }
   
     void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState new_state) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::SignalingChange(" << new_state << ")" << std::endl;
+      python_log("debug" , "PeerConnectionObserver::SignalingChange("+std::to_string(new_state)+")");
     };
 
     void OnAddStream(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::AddStream" << std::endl;
+      python_log("debug" , "PeerConnectionObserver::AddStream");
     };
 
     void OnRemoveStream(rtc::scoped_refptr<webrtc::MediaStreamInterface> stream) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::RemoveStream" << std::endl;
+      python_log("debug" , "PeerConnectionObserver::RemoveStream");
     };
 
     void OnDataChannel(rtc::scoped_refptr<webrtc::DataChannelInterface> data_channel) override {
       std::cout << std::this_thread::get_id() << ":"
                 << "PeerConnectionObserver::DataChannel(" << data_channel
                 << ", " << parent.data_channel.get() << ")" << std::endl;
-      // Answer送信側は、onDataChannelでDataChannelの接続を受け付ける
       parent.data_channel = data_channel;
       parent.data_channel->RegisterObserver(&parent.dco);
     };
 
     void OnRenegotiationNeeded() override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::RenegotiationNeeded" << std::endl;
+      python_log("debug" , "PeerConnectionObserver::OnRenegotiationNeeded");
     };
 
     void OnIceConnectionChange(webrtc::PeerConnectionInterface::IceConnectionState new_state) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::IceConnectionChange(" << new_state << ")" << std::endl;
+        // I have no idea why, but uncommenting python_log make the program freeze
+        //python_log("debug" , "PeerConnectionObserver::IceConnectionChange");
     };
 
     void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState new_state) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::IceGatheringChange(" << new_state << ")" << std::endl;
+        python_log("debug" , "PeerConnectionObserver::IceGatheringChange");
     };
 
     void OnIceCandidate(const webrtc::IceCandidateInterface* candidate) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "PeerConnectionObserver::IceCandidate" << std::endl;
+      python_log("debug" , "PeerConnectionObserver::IceCandidate");
       parent.onIceCandidate(candidate);
     };
   };
@@ -118,22 +115,16 @@ class Connection {
     DCO(Connection& parent) : parent(parent) {
     }
 
-    // 接続状況が変化した時に発火する。切断は発火タイミングで値を確認して検知可能
     void OnStateChange() override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "DataChannelObserver::StateChange" << std::endl;
+        python_log("debug" , "DataChannelObserver::StateChange");
     };
     
-    // メッセージ受信
     void OnMessage(const webrtc::DataBuffer& buffer) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "DataChannelObserver::Message" << std::endl;
-      std::cout << std::string(buffer.data.data<char>(), buffer.data.size()) << std::endl;
+        python_log("info" , "DataChannelObserver::Message: "+ std::string(buffer.data.data<char>(), buffer.data.size()));
     };
 
     void OnBufferedAmountChange(uint64_t previous_amount) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "DataChannelObserver::BufferedAmountChange(" << previous_amount << ")" << std::endl;
+        python_log("debug" , "DataChannelObserver::BufferedAmountChange");
     };
   };
 
@@ -146,14 +137,12 @@ class Connection {
     }
   
     void OnSuccess(webrtc::SessionDescriptionInterface* desc) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "CreateSessionDescriptionObserver::OnSuccess" << std::endl;
+      python_log("debug" , "CreateSessionDescriptionObserver::OnSuccess");
       parent.onSuccessCSD(desc);
     };
 
     void OnFailure(const std::string& error) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "CreateSessionDescriptionObserver::OnFailure" << std::endl << error << std::endl;
+      python_log("warn" , "CreateSessionDescriptionObserver::OnFailure\n"+ error);
     };
   };
 
@@ -166,13 +155,11 @@ class Connection {
     }
     
     void OnSuccess() override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "SetSessionDescriptionObserver::OnSuccess" << std::endl;
+      python_log("debug" , "SetSessionDescriptionObserver::OnSuccess");
     };
 
     void OnFailure(const std::string& error) override {
-      std::cout << std::this_thread::get_id() << ":"
-                << "SetSessionDescriptionObserver::OnFailure" << std::endl << error << std::endl;
+      python_log("warn" , "SetSessionDescriptionObserver::OnFailure\n"+ error);
     };
   };
 
@@ -207,7 +194,7 @@ void create_offer(std::function<void(std::string)> callback) {
 
   if (connection.peer_connection.get() == nullptr) {
     peer_connection_factory = nullptr;
-    std::cout << "Error on CreatePeerConnection." << std::endl;
+    python_log("warn", "Error on CreatePeerConnection.");
     return;
   }
   connection.sdp_type = "Offer";  
@@ -223,16 +210,14 @@ void create_answer(const std::string& offer, std::function<void(std::string)> ca
 
   if (connection.peer_connection.get() == nullptr) {
     peer_connection_factory = nullptr;
-    std::cout << "Error on CreatePeerConnection." << std::endl;
+    python_log("warn", "Error on CreatePeerConnection.");
     return;
   }
   webrtc::SdpParseError error;
   webrtc::SessionDescriptionInterface* session_description(
       webrtc::CreateSessionDescription("offer", offer, &error));
   if (session_description == nullptr) {
-    std::cout << "Error on CreateSessionDescription." << std::endl
-              << error.line << std::endl
-              << error.description << std::endl;
+    python_log("warn", "Error on CreateSessionDescription.\n" + error.line + "\n" +  error.description);
   }
   connection.peer_connection->SetRemoteDescription(connection.ssdo, session_description);
 
@@ -246,9 +231,7 @@ void set_answer(const std::string& answer) {
   webrtc::SessionDescriptionInterface* session_description(
       webrtc::CreateSessionDescription("answer", answer, &error));
   if (session_description == nullptr) {
-    std::cout << "Error on CreateSessionDescription." << std::endl
-              << error.line << std::endl
-              << error.description << std::endl;
+    python_log("warn", "Error on CreateSessionDescription.\n" + error.line + "\n" +  error.description);
   }
   connection.peer_connection->SetRemoteDescription(
           connection.ssdo, session_description);

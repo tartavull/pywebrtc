@@ -14,7 +14,7 @@ clang++ \
     -O3 \
     -Wall \
     -shared \
-    -std=c++11 -undefined \
+    -std=c++14 -undefined \
     dynamic_lookup `python3 -m pybind11 --includes` \
     -o pybind.so \
     -I ../include \
