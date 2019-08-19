@@ -23,15 +23,12 @@ py::object answer_future;
 PyThreadState *gil;
 PyGILState_STATE gstate;
 std::function<void(std::string,std::string)> python_logging;
+std::function<void(std::string)> python_on_message;
 
 void guarded_log(std::string level, std::string msg) {
     gstate = PyGILState_Ensure();
     python_logging(level, msg);
     PyGILState_Release(gstate);
-}
-
-void set_logging_callback(std::function<void(std::string,std::string)> fn) {
-    python_logging = fn;
 }
 
 void offer_callback(std::string offer) {
@@ -59,8 +56,6 @@ void create_offer(py::object future) {
      */
     gil = PyEval_SaveThread();
     offer_future = future;
-    pywebrtc::set_log_function(guarded_log);
-    pywebrtc::initialize();
     pywebrtc::create_offer(offer_callback);
     PyEval_RestoreThread(gil);
 }
@@ -68,8 +63,6 @@ void create_offer(py::object future) {
 void create_answer(std::string offer, py::object future) {
     gil = PyEval_SaveThread();
     answer_future = future;
-    pywebrtc::set_log_function(guarded_log);
-    pywebrtc::initialize();
     pywebrtc::create_answer(offer, answer_callback);
     PyEval_RestoreThread(gil);
 }
@@ -80,14 +73,22 @@ void set_answer(const std::string& answer) {
     PyEval_RestoreThread(gil);
 }
 
+void constructor(std::function<void(std::string,std::string)> logging_callback, 
+                 std::function<void(std::string)> on_message_callback) {
+    python_logging = logging_callback;
+    python_on_message =  on_message_callback;
+    pywebrtc::set_logging(logging_callback);
+    pywebrtc::set_on_message(python_on_message);
+    pywebrtc::initialize();
+}
+
 auto cleanup_callback = []() {
-    std::cout << "module destructor called" << std::endl;
     pywebrtc::destructor();
 };
 
 
 PYBIND11_MODULE(pybind, m) {
-    m.def("set_logging_callback", &set_logging_callback);
+    m.def("constructor", &constructor);
     m.def("create_offer", &create_offer);
     m.def("create_answer", &create_answer);
     m.def("set_answer", &set_answer);

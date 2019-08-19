@@ -26,9 +26,13 @@ namespace pywebrtc
 std::function<void(std::string)> offer_callback;
 std::function<void(std::string)> answer_callback;
 std::function<void(std::string,std::string)> python_log;
+std::function<void(std::string)> python_on_message;
 
-void set_log_function(std::function<void(std::string, std::string)> fn) {
+void set_logging(const std::function<void(std::string, std::string)> fn) {
     python_log = fn;
+}
+void set_on_message(const std::function<void(std::string)> fn) {
+    python_on_message = fn;
 }
 
 class Connection {
@@ -108,19 +112,13 @@ class Connection {
   };
   
   class DCO : public webrtc::DataChannelObserver {
-   private:
-    Connection& parent;
-
    public:
-    DCO(Connection& parent) : parent(parent) {
-    }
-
     void OnStateChange() override {
         python_log("debug" , "DataChannelObserver::StateChange");
     };
     
     void OnMessage(const webrtc::DataBuffer& buffer) override {
-        python_log("info" , "DataChannelObserver::Message: "+ std::string(buffer.data.data<char>(), buffer.data.size()));
+        python_on_message(std::string(buffer.data.data<char>(), buffer.data.size()));
     };
 
     void OnBufferedAmountChange(uint64_t previous_amount) override {
@@ -147,13 +145,7 @@ class Connection {
   };
 
   class SSDO : public webrtc::SetSessionDescriptionObserver {
-   private:
-    Connection& parent;
-
    public:
-    SSDO(Connection& parent) : parent(parent) {
-    }
-    
     void OnSuccess() override {
       python_log("debug" , "SetSessionDescriptionObserver::OnSuccess");
     };
@@ -170,15 +162,15 @@ class Connection {
 
   Connection() :
       pco(*this),
-      dco(*this),
+      dco(),
       csdo(new rtc::RefCountedObject<CSDO>(*this)),
-      ssdo(new rtc::RefCountedObject<SSDO>(*this)) {
+      ssdo(new rtc::RefCountedObject<SSDO>()) {
   }
 };
 
-std::unique_ptr<rtc::Thread> network_thread;
-std::unique_ptr<rtc::Thread> worker_thread;
-std::unique_ptr<rtc::Thread> signaling_thread;
+auto network_thread = std::make_unique<rtc::Thread>();
+auto worker_thread = std::make_unique<rtc::Thread>();
+auto signaling_thread = std::make_unique<rtc::Thread>();
 rtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> peer_connection_factory;
 webrtc::PeerConnectionInterface::RTCConfiguration configuration;
 Connection connection;

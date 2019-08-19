@@ -3,45 +3,18 @@ import asyncio as aio
 import sys
 import time
 import logging
+import color_logging
 
 sys.path.append('../build')
 import pybind as webrtc
 
-
-NO_COLOR = "\33[m"
-RED, GREEN, ORANGE, BLUE, PURPLE, LBLUE, GREY = \
-    map("\33[%dm".__mod__, range(31, 38))
-
-logging.basicConfig(format="%(levelname)s %(name)s %(asctime)s %(message)s", level=logging.DEBUG)
 logger = logging.getLogger('pywebrtc')
+color_logging.add_colors(logger)
 
-def add_color(logger_method, color):
-  def wrapper(message, *args, **kwargs):
-    return logger_method(
-      # the coloring is applied here.
-      color+message+NO_COLOR,
-      *args, **kwargs
-    )
-  return wrapper
+def on_message(msg):
+    print('recieved webrtc message:'+ msg)
 
-for level, color in zip(("debug", "info", "warn", "error", "critical"), (GREEN, BLUE, ORANGE, RED, PURPLE)):
-  setattr(logger, level, add_color(getattr(logger, level), color))
-
-def log(level, msg):
-    if level == 'debug':
-        logger.debug(msg)
-    elif level == 'info':
-        logger.info(msg)
-    elif level == 'warn':
-        logger.warn(msg)
-    elif level == 'error':
-        logger.error(msg)
-    elif level == 'critical':
-        logger.critial(msg)
-
-webrtc.set_logging_callback(log)
-
-
+webrtc.constructor(color_logging.log, on_message)
 candidates_sent = False
 
 def wait_future_sync(f):
